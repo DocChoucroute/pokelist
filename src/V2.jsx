@@ -14,7 +14,7 @@ const GENERATIONS = [
 ];
 
 function spriteUrl(id) {
-  return `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${id}.png`;
+  return `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${id}.png`;
 }
 
 function buildRange(gen) {
@@ -39,14 +39,15 @@ async function exportImage(selected, allPokemon) {
     .sort((a, b) => a.id - b.id);
   if (!list.length) return;
 
+  // Portrait mobile : 9/16 ratio, 720x1280
   const W = 720;
   const HEADER_H = 100;
   const FOOTER_H = 60;
   const PADDING = 24;
   const COLS = 4;
-  const CELL = Math.floor((W - PADDING * 2) / COLS);
-  const SPRITE = 120;
-  const CELL_H = SPRITE + 44;
+  const CELL = Math.floor((W - PADDING * 2) / COLS); // ~168px
+  const SPRITE = 96;
+  const CELL_H = SPRITE + 36;
   const ROWS = Math.ceil(list.length / COLS);
   const GRID_H = ROWS * CELL_H + PADDING;
   const H = Math.max(1280, HEADER_H + GRID_H + FOOTER_H + PADDING * 2);
@@ -56,25 +57,29 @@ async function exportImage(selected, allPokemon) {
   canvas.height = H;
   const ctx = canvas.getContext("2d");
 
+  // Background blanc cassé
   ctx.fillStyle = "#F8F7F4";
   ctx.fillRect(0, 0, W, H);
 
+  // Bande header orange
   ctx.fillStyle = "#FF6B00";
   ctx.fillRect(0, 0, W, HEADER_H);
 
+  // Titre
   ctx.fillStyle = "#ffffff";
   ctx.font = "bold 36px 'Segoe UI', Arial, sans-serif";
   ctx.textAlign = "left";
   ctx.fillText("Poké", 32, 58);
   ctx.fillStyle = "#FFD599";
-  const pokeWidth = ctx.measureText("Poké").width;
-  ctx.fillText("List", 32 + pokeWidth, 58);
+  ctx.fillText("List", 32 + ctx.measureText("Poké").width, 58);
 
+  // Compteur
   ctx.fillStyle = "#fff";
   ctx.font = "18px 'Segoe UI', Arial, sans-serif";
   ctx.textAlign = "right";
   ctx.fillText(`${list.length} Pokémon`, W - 32, 58);
 
+  // Charger les sprites
   const loadImg = (url) => new Promise((res) => {
     const img = new Image();
     img.crossOrigin = "anonymous";
@@ -90,28 +95,34 @@ async function exportImage(selected, allPokemon) {
     const x = PADDING + col * CELL;
     const y = HEADER_H + PADDING + row * CELL_H;
 
+    // Carte blanche avec ombre légère
     ctx.fillStyle = "#FFFFFF";
+    const rx = 12;
     ctx.beginPath();
-    ctx.roundRect(x + 4, y + 4, CELL - 8, CELL_H - 6, 12);
+    ctx.roundRect(x + 4, y + 4, CELL - 8, CELL_H - 6, rx);
     ctx.fill();
 
+    // Sprite
     const img = images[i];
     if (img) {
-      ctx.drawImage(img, x + (CELL - SPRITE) / 2, y + 8, SPRITE, SPRITE);
+      ctx.drawImage(img, x + (CELL - SPRITE) / 2, y + 6, SPRITE, SPRITE);
     }
 
+    // Nom
     ctx.fillStyle = "#1a1a1a";
     ctx.font = "bold 13px 'Segoe UI', Arial, sans-serif";
     ctx.textAlign = "center";
-    const name = pokemon.frName || pokemon.name;
+    const name = (pokemon.frName || pokemon.name);
     const displayName = name.length > 10 ? name.slice(0, 9) + "…" : name;
-    ctx.fillText(displayName, x + CELL / 2, y + SPRITE + 22);
+    ctx.fillText(displayName, x + CELL / 2, y + SPRITE + 18);
 
+    // Numéro
     ctx.fillStyle = "#999";
     ctx.font = "11px monospace";
-    ctx.fillText(`#${String(pokemon.id).padStart(3, "0")}`, x + CELL / 2, y + SPRITE + 38);
+    ctx.fillText(`#${String(pokemon.id).padStart(3, "0")}`, x + CELL / 2, y + SPRITE + 33);
   });
 
+  // Footer
   ctx.fillStyle = "#eee";
   ctx.fillRect(0, H - FOOTER_H, W, FOOTER_H);
   ctx.fillStyle = "#999";
@@ -168,7 +179,6 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(new Set());
   const [exporting, setExporting] = useState(false);
-  const [toast, setToast] = useState(false);
   const frNameCache = useRef({});
 
   const currentGen = GENERATIONS.find((g) => g.value === gen);
@@ -229,26 +239,16 @@ export default function App() {
     setExporting(true);
     await exportImage(selected, allPokemon);
     setExporting(false);
-    setToast(true);
-    setTimeout(() => setToast(false), 3000);
   };
 
   return (
     <div className="min-h-screen bg-gray-50 font-sans">
 
-      {/* Toast confirmation */}
-      {toast && (
-        <div className="fixed top-6 left-0 right-0 flex justify-center z-50 px-4 pointer-events-none">
-          <div className="bg-green-500 text-white text-sm font-semibold px-5 py-3 rounded-2xl shadow-lg animate-bounce">
-            ✅ Image enregistrée !
-          </div>
-        </div>
-      )}
-
       {/* Header */}
       <header className="sticky top-0 z-30 bg-white border-b border-gray-100 shadow-sm">
         <div className="max-w-2xl mx-auto px-4 pt-4 pb-3">
 
+          {/* Logo + compteur */}
           <div className="flex items-center justify-between mb-3">
             <h1 className="text-2xl font-black tracking-tight text-gray-900">
               Poké<span className="text-orange-500">List</span>
@@ -268,6 +268,7 @@ export default function App() {
             )}
           </div>
 
+          {/* Recherche */}
           <input
             type="text"
             placeholder="🔍  Rechercher un Pokémon…"
@@ -276,7 +277,8 @@ export default function App() {
             className="w-full bg-gray-100 border-0 text-gray-800 text-sm px-4 py-2.5 rounded-xl outline-none focus:ring-2 focus:ring-orange-300 placeholder:text-gray-400 mb-3"
           />
 
-          <div className="flex gap-1.5 overflow-x-auto pb-1">
+          {/* Filtres gen */}
+          <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
             {GENERATIONS.map((g) => (
               <button
                 key={g.value}
@@ -330,11 +332,15 @@ export default function App() {
             disabled={exporting}
             className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 active:scale-95 disabled:opacity-60 text-white font-bold px-6 py-3.5 rounded-2xl shadow-lg shadow-orange-200 transition-all text-sm"
           >
-            {exporting ? "Export en cours…" : `⬇ Exporter ma liste (${selected.size})`}
+            {exporting
+              ? "Export en cours…"
+              : `⬇ Exporter ma liste (${selected.size})`
+            }
           </button>
         </div>
       )}
 
+      {/* Espace pour le bouton flottant */}
       {selected.size > 0 && <div className="h-24" />}
     </div>
   );
