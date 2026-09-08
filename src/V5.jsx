@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
 const GENERATIONS = [
   { label: "Toutes", value: 0, range: [1, 1025] },
   { label: "Gen I", value: 1, range: [1, 151] },
@@ -15,7 +17,8 @@ const GENERATIONS = [
 
 const STORAGE_LISTS_KEY = "pokelist-lists-v2";
 const STORAGE_ACTIVE_KEY = "pokelist-active-list";
-const APP_URL = "https://pokelist-sooty.vercel.app";
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function spriteUrl(id) {
   return `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${id}.png`;
@@ -49,33 +52,6 @@ function saveLists(lists) {
 
 function newList(name) {
   return { id: Date.now().toString(), name, pokemonIds: [], createdAt: Date.now() };
-}
-
-// Encode liste → URL partageable
-function buildShareUrl(list) {
-  const payload = JSON.stringify({ name: list.name, pokemonIds: list.pokemonIds, v: 1 });
-  const encoded = btoa(unescape(encodeURIComponent(payload)));
-  return `${APP_URL}/?import=${encoded}`;
-}
-
-// Lire le paramètre import depuis l'URL au chargement
-function readImportFromUrl() {
-  try {
-    const params = new URLSearchParams(window.location.search);
-    const raw = params.get("import");
-    if (!raw) return null;
-    const decoded = decodeURIComponent(escape(atob(raw)));
-    const data = JSON.parse(decoded);
-    if (data && data.pokemonIds && data.name) return data;
-    return null;
-  } catch { return null; }
-}
-
-// Nettoyer l'URL après import (sans recharger la page)
-function clearImportFromUrl() {
-  const url = new URL(window.location.href);
-  url.searchParams.delete("import");
-  window.history.replaceState({}, "", url.toString());
 }
 
 // ─── Export image ─────────────────────────────────────────────────────────────
@@ -134,81 +110,42 @@ async function exportImage(pokemonIds, allPokemon, listName) {
 // ─── QR Modal ─────────────────────────────────────────────────────────────────
 
 function QRModal({ list, onClose }) {
-  const containerRef = useRef(null);
+  const canvasRef = useRef(null);
   const [ready, setReady] = useState(false);
-  const [error, setError] = useState(false);
-  const shareUrl = buildShareUrl(list);
 
   useEffect(() => {
-    let mounted = true;
-
-    const generate = () => {
-      if (!containerRef.current || !mounted) return;
-      containerRef.current.innerHTML = "";
-      try {
-        new window.QRCode(containerRef.current, {
-          text: shareUrl,
-          width: 240,
-          height: 240,
+    const data = JSON.stringify({ name: list.name, pokemonIds: list.pokemonIds, v: 1 });
+    // Charger qrcode via CDN
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js";
+    script.onload = () => {
+      if (canvasRef.current) {
+        canvasRef.current.innerHTML = "";
+        new window.QRCode(canvasRef.current, {
+          text: data,
+          width: 260,
+          height: 260,
           colorDark: "#1a1a1a",
           colorLight: "#ffffff",
           correctLevel: window.QRCode.CorrectLevel.M,
         });
-        if (mounted) setReady(true);
-      } catch { if (mounted) setError(true); }
+        setReady(true);
+      }
     };
-
-    if (window.QRCode) {
-      generate();
-    } else {
-      const script = document.createElement("script");
-      script.src = "https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js";
-      script.onload = generate;
-      script.onerror = () => { if (mounted) setError(true); };
-      document.body.appendChild(script);
-    }
-
-    return () => { mounted = false; };
+    document.body.appendChild(script);
+    return () => { try { document.body.removeChild(script); } catch {} };
   }, [list]);
-
-  const copyLink = () => {
-    navigator.clipboard.writeText(shareUrl).then(() => {}).catch(() => {});
-  };
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center px-4" onClick={onClose}>
       <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <h2 className="text-lg font-black text-gray-900 mb-1">Partager la liste</h2>
-        <p className="text-sm text-gray-500 mb-1">
-          Scanne ce QR code pour ouvrir{" "}
-          <span className="font-semibold text-gray-700">"{list.name}"</span>{" "}
-          directement dans PokéList — même sans l'avoir installé !
-        </p>
-        <p className="text-xs text-orange-500 font-medium mb-4">📱 Fonctionne avec l'appareil photo du téléphone</p>
-
-        <div className="flex justify-center mb-4 min-h-[240px] items-center">
-          {error ? (
-            <p className="text-red-400 text-sm text-center">Impossible de générer le QR code.</p>
-          ) : (
-            <>
-              <div ref={containerRef} className={`rounded-xl overflow-hidden ${ready ? "" : "hidden"}`} />
-              {!ready && !error && <div className="w-[240px] h-[240px] bg-gray-100 rounded-xl animate-pulse" />}
-            </>
-          )}
+        <p className="text-sm text-gray-500 mb-4">L'autre personne scanne ce QR code depuis l'app pour importer <span className="font-semibold text-gray-700">"{list.name}"</span></p>
+        <div className="flex justify-center mb-4">
+          <div ref={canvasRef} className="rounded-xl overflow-hidden" />
+          {!ready && <div className="w-[260px] h-[260px] bg-gray-100 rounded-xl animate-pulse" />}
         </div>
-
-        <p className="text-xs text-gray-400 text-center mb-4">
-          {list.pokemonIds.length} Pokémon · Ouvre pokelist-sooty.vercel.app
-        </p>
-
-        {/* Lien copiable */}
-        <button onClick={copyLink}
-          className="w-full flex items-center gap-2 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-2xl px-4 py-2.5 mb-3 transition-colors text-left">
-          <span className="text-base">🔗</span>
-          <span className="text-xs text-gray-500 truncate flex-1">{shareUrl}</span>
-          <span className="text-xs text-orange-500 font-semibold flex-shrink-0">Copier</span>
-        </button>
-
+        <p className="text-xs text-gray-400 text-center mb-4">{list.pokemonIds.length} Pokémon · Données encodées dans le QR</p>
         <button onClick={onClose} className="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-3 rounded-2xl text-sm transition-colors">
           Fermer
         </button>
@@ -217,42 +154,81 @@ function QRModal({ list, onClose }) {
   );
 }
 
-// ─── Import Banner (affiché quand on arrive via un lien partagé) ──────────────
+// ─── Scanner Modal ─────────────────────────────────────────────────────────────
 
-function ImportBanner({ importData, onAccept, onDismiss }) {
+function ScannerModal({ onImport, onClose }) {
+  const videoRef = useRef(null);
+  const [error, setError] = useState(null);
+  const [scanning, setScanning] = useState(true);
+  const streamRef = useRef(null);
+
+  useEffect(() => {
+    let interval;
+    const startCamera = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        streamRef.current = stream;
+        if (videoRef.current) videoRef.current.srcObject = stream;
+
+        // Charger jsQR
+        const script = document.createElement("script");
+        script.src = "https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js";
+        script.onload = () => {
+          const canvas = document.createElement("canvas");
+          const ctx = canvas.getContext("2d");
+          interval = setInterval(() => {
+            const video = videoRef.current;
+            if (!video || !window.jsQR) return;
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const code = window.jsQR(imageData.data, imageData.width, imageData.height);
+            if (code) {
+              try {
+                const data = JSON.parse(code.data);
+                if (data.pokemonIds && data.name) {
+                  clearInterval(interval);
+                  stopCamera();
+                  onImport(data);
+                }
+              } catch {}
+            }
+          }, 300);
+        };
+        document.body.appendChild(script);
+      } catch (e) {
+        setError("Impossible d'accéder à la caméra. Autorise l'accès depuis les paramètres du navigateur.");
+      }
+    };
+
+    const stopCamera = () => {
+      if (streamRef.current) { streamRef.current.getTracks().forEach((t) => t.stop()); }
+    };
+
+    startCamera();
+    return () => { clearInterval(interval); if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop()); };
+  }, []);
+
   return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center px-4">
-      <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl">
-        <div className="text-4xl text-center mb-3">🎴</div>
-        <h2 className="text-lg font-black text-gray-900 text-center mb-1">Liste reçue !</h2>
-        <p className="text-sm text-gray-500 text-center mb-2">
-          Tu as reçu la liste
-        </p>
-        <p className="text-base font-bold text-orange-600 text-center mb-1">"{importData.name}"</p>
-        <p className="text-sm text-gray-400 text-center mb-6">
-          {importData.pokemonIds.length} Pokémon à trouver
-        </p>
-
-        {/* Aperçu des premiers sprites */}
-        <div className="flex justify-center gap-1 mb-6">
-          {importData.pokemonIds.slice(0, 6).map((id) => (
-            <img key={id} src={spriteUrl(id)} alt="" width={40} height={40} className="w-10 h-10 object-contain" />
-          ))}
-          {importData.pokemonIds.length > 6 && (
-            <div className="w-10 h-10 rounded-full bg-orange-50 flex items-center justify-center text-xs font-bold text-orange-400">
-              +{importData.pokemonIds.length - 6}
+    <div className="fixed inset-0 bg-black/80 z-50 flex items-end justify-center" onClick={onClose}>
+      <div className="bg-white rounded-t-3xl p-6 w-full max-w-sm shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <h2 className="text-lg font-black text-gray-900 mb-1">Scanner un QR code</h2>
+        <p className="text-sm text-gray-500 mb-4">Pointe la caméra vers le QR code de la liste à importer</p>
+        {error ? (
+          <div className="bg-red-50 text-red-600 text-sm rounded-2xl p-4 mb-4">{error}</div>
+        ) : (
+          <div className="rounded-2xl overflow-hidden bg-black mb-4 relative">
+            <video ref={videoRef} autoPlay playsInline muted className="w-full aspect-square object-cover" />
+            {/* Viseur */}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="w-48 h-48 border-2 border-orange-400 rounded-xl opacity-80" />
             </div>
-          )}
-        </div>
-
-        <div className="flex gap-2">
-          <button onClick={onDismiss} className="flex-1 bg-gray-100 text-gray-600 font-semibold py-3 rounded-2xl text-sm">
-            Ignorer
-          </button>
-          <button onClick={onAccept} className="flex-1 bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 rounded-2xl text-sm transition-colors">
-            Ajouter à mes listes
-          </button>
-        </div>
+          </div>
+        )}
+        <button onClick={onClose} className="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-3 rounded-2xl text-sm transition-colors">
+          Annuler
+        </button>
       </div>
     </div>
   );
@@ -301,36 +277,29 @@ export default function App() {
     const loaded = loadLists();
     return loaded.length > 0 ? loaded : [newList("Ma collection")];
   });
-  const [activeListId, setActiveListId] = useState(() => localStorage.getItem(STORAGE_ACTIVE_KEY) || null);
-  const [viewingListId, setViewingListId] = useState(null);
+  const [activeListId, setActiveListId] = useState(() => {
+    const saved = localStorage.getItem(STORAGE_ACTIVE_KEY);
+    return saved || null;
+  });
+  const [viewingListId, setViewingListId] = useState(null); // null = vue grille des listes
   const [exporting, setExporting] = useState(false);
   const [toast, setToast] = useState(null);
-  const [showQR, setShowQR] = useState(null);
+  const [showQR, setShowQR] = useState(null); // list object
+  const [showScanner, setShowScanner] = useState(false);
   const [showNewList, setShowNewList] = useState(false);
   const [newListName, setNewListName] = useState("");
-  const [pendingImport, setPendingImport] = useState(() => readImportFromUrl());
   const frNameCache = useRef({});
 
   const activeList = lists.find((l) => l.id === activeListId) || lists[0];
   const viewingList = lists.find((l) => l.id === viewingListId);
 
+  // Sync localStorage
   useEffect(() => { saveLists(lists); }, [lists]);
   useEffect(() => { if (activeList) localStorage.setItem(STORAGE_ACTIVE_KEY, activeList.id); }, [activeList]);
 
   const currentGen = GENERATIONS.find((g) => g.value === gen);
 
-  const loadPokemonById = useCallback(async (id) => {
-    if (allPokemon[id]) return;
-    try {
-      const res = await fetch(`https://pokeapi.co/api/v2/pokemon/${id}`);
-      if (!res.ok) return;
-      const data = await res.json();
-      const frName = await fetchFrenchName(id);
-      if (frName) frNameCache.current[id] = frName;
-      setAllPokemon((prev) => ({ ...prev, [id]: { id, name: data.name, frName: frNameCache.current[id] || null } }));
-    } catch {}
-  }, [allPokemon]);
-
+  // Charger Pokémon du Pokédex
   useEffect(() => {
     const ids = buildRange(currentGen);
     const missing = ids.filter((id) => !allPokemon[id]);
@@ -361,13 +330,20 @@ export default function App() {
     fetchBatch();
   }, [gen]);
 
-  // Charger les Pokémon des listes sauvegardées + import en attente
+  // Charger Pokémon des listes sauvegardées
   useEffect(() => {
-    const allIds = [...new Set([
-      ...lists.flatMap((l) => l.pokemonIds),
-      ...(pendingImport?.pokemonIds || []),
-    ])];
-    allIds.filter((id) => !allPokemon[id]).forEach(loadPokemonById);
+    const allIds = [...new Set(lists.flatMap((l) => l.pokemonIds))];
+    const missing = allIds.filter((id) => !allPokemon[id]);
+    missing.forEach(async (id) => {
+      try {
+        const res = await fetch(`https://pokeapi.co/api/v2/pokemon/${id}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const frName = frNameCache.current[id] || await fetchFrenchName(id);
+        if (frName) frNameCache.current[id] = frName;
+        setAllPokemon((prev) => ({ ...prev, [id]: { id, name: data.name, frName: frNameCache.current[id] || null } }));
+      } catch {}
+    });
   }, []);
 
   const showToast = useCallback((msg, type = "info") => {
@@ -377,7 +353,7 @@ export default function App() {
 
   const togglePokemonInList = useCallback((pokemonId) => {
     setLists((prev) => prev.map((l) => {
-      if (l.id !== activeList?.id) return l;
+      if (l.id !== activeList.id) return l;
       const ids = l.pokemonIds.includes(pokemonId)
         ? l.pokemonIds.filter((id) => id !== pokemonId)
         : [...l.pokemonIds, pokemonId];
@@ -410,26 +386,24 @@ export default function App() {
     showToast("Liste supprimée", "remove");
   };
 
-  const handleAcceptImport = useCallback(() => {
-    if (!pendingImport) return;
-    const imported = {
-      id: Date.now().toString(),
-      name: pendingImport.name,
-      pokemonIds: pendingImport.pokemonIds,
-      createdAt: Date.now(),
-    };
+  const handleImportQR = useCallback((data) => {
+    setShowScanner(false);
+    const imported = { id: Date.now().toString(), name: data.name + " (importée)", pokemonIds: data.pokemonIds, createdAt: Date.now() };
     setLists((prev) => [...prev, imported]);
-    pendingImport.pokemonIds.forEach(loadPokemonById);
-    setPendingImport(null);
-    clearImportFromUrl();
-    showToast(`Liste "${pendingImport.name}" ajoutée !`, "add");
-    setTab("lists");
-  }, [pendingImport, loadPokemonById]);
-
-  const handleDismissImport = () => {
-    setPendingImport(null);
-    clearImportFromUrl();
-  };
+    showToast(`Liste "${data.name}" importée !`, "add");
+    // Charger les Pokémon importés
+    data.pokemonIds.forEach(async (id) => {
+      if (allPokemon[id]) return;
+      try {
+        const res = await fetch(`https://pokeapi.co/api/v2/pokemon/${id}`);
+        if (!res.ok) return;
+        const d = await res.json();
+        const frName = await fetchFrenchName(id);
+        if (frName) frNameCache.current[id] = frName;
+        setAllPokemon((prev) => ({ ...prev, [id]: { id, name: d.name, frName: frNameCache.current[id] || null } }));
+      } catch {}
+    });
+  }, [allPokemon]);
 
   const handleExport = async (list) => {
     setExporting(true);
@@ -448,6 +422,7 @@ export default function App() {
 
   const activeSelected = new Set(activeList?.pokemonIds || []);
 
+  // Pokémon de la liste en cours de visualisation
   const viewingPokemon = (viewingList?.pokemonIds || [])
     .map((id) => allPokemon[id]).filter(Boolean)
     .filter((p) => {
@@ -460,15 +435,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gray-50 font-sans pb-28">
 
-      {/* Import banner (lien partagé) */}
-      {pendingImport && (
-        <ImportBanner
-          importData={pendingImport}
-          onAccept={handleAcceptImport}
-          onDismiss={handleDismissImport}
-        />
-      )}
-
+      {/* Toast */}
       {toast && (
         <div className="fixed top-5 left-0 right-0 flex justify-center z-50 px-4 pointer-events-none">
           <div className={`text-white text-sm font-semibold px-5 py-3 rounded-2xl shadow-lg
@@ -478,16 +445,24 @@ export default function App() {
         </div>
       )}
 
+      {/* Modals */}
       {showQR && <QRModal list={showQR} onClose={() => setShowQR(null)} />}
+      {showScanner && <ScannerModal onImport={handleImportQR} onClose={() => setShowScanner(false)} />}
 
+      {/* Modal nouvelle liste */}
       {showNewList && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center px-4" onClick={() => setShowNewList(false)}>
           <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-lg font-black text-gray-900 mb-4">Nouvelle liste</h2>
-            <input autoFocus type="text" placeholder="Ex : Cartes manquantes Amis…"
-              value={newListName} onChange={(e) => setNewListName(e.target.value)}
+            <input
+              autoFocus
+              type="text"
+              placeholder="Ex : Cartes manquantes Amis…"
+              value={newListName}
+              onChange={(e) => setNewListName(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && createList()}
-              className="w-full bg-gray-100 text-gray-800 text-sm px-4 py-3 rounded-xl outline-none focus:ring-2 focus:ring-orange-300 mb-4" />
+              className="w-full bg-gray-100 text-gray-800 text-sm px-4 py-3 rounded-xl outline-none focus:ring-2 focus:ring-orange-300 mb-4"
+            />
             <div className="flex gap-2">
               <button onClick={() => setShowNewList(false)} className="flex-1 bg-gray-100 text-gray-600 font-semibold py-3 rounded-2xl text-sm">Annuler</button>
               <button onClick={createList} disabled={!newListName.trim()} className="flex-1 bg-orange-500 disabled:opacity-40 text-white font-semibold py-3 rounded-2xl text-sm">Créer</button>
@@ -501,11 +476,13 @@ export default function App() {
         <div className="max-w-2xl mx-auto px-4 pt-4 pb-0">
           <div className="flex items-center justify-between mb-3">
             <h1 className="text-2xl font-black tracking-tight text-gray-900">Poké<span className="text-orange-500">List</span></h1>
-            {tab === "pokedex" && activeList && (
-              <span className="text-xs bg-orange-100 text-orange-700 px-2.5 py-1 rounded-full font-bold truncate max-w-[160px]">
-                → {activeList.name}
-              </span>
-            )}
+            <div className="flex items-center gap-2">
+              {tab === "pokedex" && activeList && (
+                <span className="text-xs bg-orange-100 text-orange-700 px-2.5 py-1 rounded-full font-bold truncate max-w-[140px]">
+                  → {activeList.name}
+                </span>
+              )}
+            </div>
           </div>
           <div className="flex border-b border-gray-100">
             <button onClick={() => setTab("pokedex")}
@@ -528,17 +505,20 @@ export default function App() {
       {/* ── POKÉDEX ── */}
       {tab === "pokedex" && (
         <div className="max-w-2xl mx-auto px-4 pt-4">
+          {/* Sélecteur de liste active */}
           <div className="flex gap-1.5 overflow-x-auto pb-2 mb-2">
             {lists.map((l) => (
               <button key={l.id} onClick={() => setActiveListId(l.id)}
                 className={`flex-shrink-0 text-xs px-3 py-1.5 rounded-full font-semibold transition-colors border
                   ${activeList?.id === l.id ? "bg-orange-500 text-white border-orange-500" : "bg-white text-gray-500 border-gray-200 hover:border-orange-300"}`}>
-                {l.name}{l.pokemonIds.length > 0 ? ` (${l.pokemonIds.length})` : ""}
+                {l.name} {l.pokemonIds.length > 0 && <span className="ml-1 opacity-70">({l.pokemonIds.length})</span>}
               </button>
             ))}
           </div>
+
           <input type="text" placeholder="🔍  Rechercher un Pokémon…" value={search} onChange={(e) => setSearch(e.target.value)}
             className="w-full bg-gray-100 border-0 text-gray-800 text-sm px-4 py-2.5 rounded-xl outline-none focus:ring-2 focus:ring-orange-300 placeholder:text-gray-400 mb-3" />
+
           <div className="flex gap-1.5 overflow-x-auto pb-2 mb-3">
             {GENERATIONS.map((g) => (
               <button key={g.value} onClick={() => setGen(g.value)}
@@ -548,6 +528,7 @@ export default function App() {
               </button>
             ))}
           </div>
+
           {loading && Object.keys(allPokemon).length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-3 py-24 text-gray-400">
               <span className="text-4xl animate-bounce">⚡</span>
@@ -571,31 +552,45 @@ export default function App() {
       {/* ── MES LISTES ── */}
       {tab === "lists" && !viewingListId && (
         <div className="max-w-2xl mx-auto px-4 pt-4">
+          {/* Actions */}
           <div className="flex gap-2 mb-4">
             <button onClick={() => setShowNewList(true)}
               className="flex-1 flex items-center justify-center gap-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold py-3 rounded-2xl transition-colors">
               + Nouvelle liste
             </button>
+            <button onClick={() => setShowScanner(true)}
+              className="flex-1 flex items-center justify-center gap-2 bg-white border border-gray-200 hover:border-orange-300 text-gray-700 text-sm font-semibold py-3 rounded-2xl transition-colors">
+              📷 Importer
+            </button>
           </div>
+
+          {/* Grille des listes */}
           <div className="flex flex-col gap-3">
             {lists.map((l) => (
               <div key={l.id} className={`bg-white rounded-2xl border-2 transition-colors overflow-hidden
                 ${activeList?.id === l.id ? "border-orange-300" : "border-gray-100"}`}>
-                <div className="flex items-center gap-3 px-4 py-3" onClick={() => { setViewingListId(l.id); setWishSearch(""); }}>
+                <div className="flex items-center gap-3 px-4 py-3">
+                  {/* Aperçu sprites */}
                   <div className="flex -space-x-2 flex-shrink-0">
                     {l.pokemonIds.slice(0, 3).map((id) => (
                       <img key={id} src={spriteUrl(id)} alt="" width={32} height={32} className="w-8 h-8 object-contain rounded-full bg-gray-50 border border-white" />
                     ))}
                     {l.pokemonIds.length === 0 && <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-300 text-lg">?</div>}
                   </div>
-                  <div className="flex-1 min-w-0">
+
+                  {/* Infos */}
+                  <div className="flex-1 min-w-0" onClick={() => { setViewingListId(l.id); setWishSearch(""); }}>
                     <p className="text-sm font-bold text-gray-800 truncate">{l.name}</p>
                     <p className="text-xs text-gray-400">{l.pokemonIds.length} Pokémon</p>
                   </div>
+
+                  {/* Badge liste active */}
                   {activeList?.id === l.id && (
                     <span className="text-[10px] bg-orange-100 text-orange-600 font-bold px-2 py-0.5 rounded-full flex-shrink-0">active</span>
                   )}
                 </div>
+
+                {/* Actions de la liste */}
                 <div className="flex border-t border-gray-50">
                   <button onClick={() => setActiveListId(l.id)}
                     className={`flex-1 text-xs py-2.5 font-semibold transition-colors
@@ -625,7 +620,7 @@ export default function App() {
         </div>
       )}
 
-      {/* ── DÉTAIL LISTE ── */}
+      {/* ── DÉTAIL D'UNE LISTE ── */}
       {tab === "lists" && viewingListId && viewingList && (
         <div className="max-w-2xl mx-auto px-4 pt-4">
           <div className="flex items-center gap-3 mb-4">
@@ -643,6 +638,7 @@ export default function App() {
               ⬇ Export
             </button>
           </div>
+
           {viewingList.pokemonIds.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-3 py-20 text-gray-400">
               <span className="text-5xl">🎴</span>
